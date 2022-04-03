@@ -2,17 +2,21 @@ package redisLock
 
 import (
 	"context"
-	"github.com/go-redis/redis/v8"
-	"github.com/zeromicro/go-zero/core/logx"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	red "github.com/go-redis/redis/v8"
+	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/stringx"
 )
 
 const (
-	letters     = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	lockCommand = `if redis.call("GET", KEYS[1]) == ARGV[1] then
+	randomLen       = 16
+	tolerance       = 500 // milliseconds
+	millisPerSecond = 1000
+	lockCommand     = `if redis.call("GET", KEYS[1]) == ARGV[1] then
     redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
     return "OK"
 else
@@ -23,52 +27,40 @@ end`
 else
     return 0
 end`
-	randomLen = 16
-	// 默认超时时间，防止死锁
-	tolerance       = 500 // milliseconds
-	millisPerSecond = 1000
 )
+
+var ctx = context.Background()
 
 // A RedisLock is a redis lock.
 type RedisLock struct {
 	// redis客户端
-	store *redis.Client
+	store *red.Client
 	// 超时时间
 	seconds uint32
-	// 锁key
-	key string
-	// 锁value，防止锁被别人获取到
-	id string
+	key     string
+	id      string
 }
-
-var ctx = context.Background()
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
 // NewRedisLock returns a RedisLock.
-func NewRedisLock(store *redis.Client, key string) *RedisLock {
+func NewRedisLock(store *red.Client, key string) *RedisLock {
 	return &RedisLock{
 		store: store,
 		key:   key,
-		// 获取锁时，锁的值通过随机字符串生成
-		// 实际上go-zero提供更加高效的随机字符串生成方式
-		// 见core/stringx/random.go：Randn
-		id: randomStr(randomLen),
+		id:    stringx.Randn(randomLen),
 	}
 }
 
 // Acquire acquires the lock.
-// 加锁
 func (rl *RedisLock) Acquire() (bool, error) {
-	// 获取过期时间
 	seconds := atomic.LoadUint32(&rl.seconds)
-	// 默认锁过期时间为500ms，防止死锁
 	resp, err := rl.store.Eval(ctx, lockCommand, []string{rl.key}, []string{
 		rl.id, strconv.Itoa(int(seconds)*millisPerSecond + tolerance),
 	}).Result()
-	if err == redis.Nil {
+	if err == red.Nil {
 		return false, nil
 	} else if err != nil {
 		logx.Errorf("Error on acquiring lock for %s, %s", rl.key, err.Error())
@@ -87,7 +79,6 @@ func (rl *RedisLock) Acquire() (bool, error) {
 }
 
 // Release releases the lock.
-// 释放锁
 func (rl *RedisLock) Release() (bool, error) {
 	resp, err := rl.store.Eval(ctx, delCommand, []string{rl.key}, []string{rl.id}).Result()
 	if err != nil {
@@ -102,17 +93,7 @@ func (rl *RedisLock) Release() (bool, error) {
 	return reply == 1, nil
 }
 
-// SetExpire sets the expire.
-// 需要注意的是需要在Acquire()之前调用
-// 不然默认为500ms自动释放
+// SetExpire sets the expiration.
 func (rl *RedisLock) SetExpire(seconds int) {
 	atomic.StoreUint32(&rl.seconds, uint32(seconds))
-}
-
-func randomStr(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-	return string(b)
 }
