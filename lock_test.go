@@ -16,14 +16,14 @@ var redisClient = redis.NewClient(&redis.Options{
 
 func TestRedisLock_TryLock(t *testing.T) {
 	timeNow := time.Now()
-	lock := NewRedisLock(redisClient, "test-try-lock", "myLock")
+	lock := NewRedisLock(redisClient, "test-try-lock")
 	wg := new(sync.WaitGroup)
 	wg.Add(50)
 
 	for i := 0; i < 50; i++ {
 		go func() {
 			defer wg.Done()
-			success, err := lock.TryLock()
+			success, err := lock.Acquire()
 			if err != nil {
 				fmt.Println(err.Error())
 				return
@@ -32,7 +32,7 @@ func TestRedisLock_TryLock(t *testing.T) {
 				fmt.Println("TryLock Fail")
 			} else {
 				defer func() {
-					lock.Unlock()
+					lock.Release()
 					fmt.Println("release the lock")
 				}()
 				fmt.Println("TryLock Success")
@@ -46,20 +46,20 @@ func TestRedisLock_TryLock(t *testing.T) {
 
 func TestRedisLock_Lock(t *testing.T) {
 	timeNow := time.Now()
-	lock := NewRedisLock(redisClient, "test-lock", "myLock")
+	lock := NewRedisLock(redisClient, "test-lock")
 	wg := new(sync.WaitGroup)
 	wg.Add(10)
 
 	for i := 0; i < 10; i++ {
 		go func() {
-			err := lock.Lock()
+			_, err := lock.Acquire()
 			if err != nil {
 				fmt.Println(err.Error())
 				return
 			}
 			fmt.Println("get lock")
 			defer func() {
-				lock.Unlock()
+				lock.Release()
 				fmt.Println("release the lock")
 			}()
 
@@ -74,48 +74,24 @@ func TestRedisLock_Lock(t *testing.T) {
 
 func TestRedisLock_LockWithTimeout(t *testing.T) {
 	timeNow := time.Now()
-	lock := NewRedisLock(redisClient, "test-lock-with-timeout", "myLock")
+	lock := NewRedisLock(redisClient, "test-lock-with-timeout")
 	wg := new(sync.WaitGroup)
 	wg.Add(20)
 
 	for i := 0; i < 20; i++ {
 		go func() {
-			err := lock.LockWithTimeout(3 * time.Second)
+			_, err := lock.Acquire()
+			lock.SetExpire(30)
 			if err != nil {
 				fmt.Println(err.Error())
 				return
 			}
 			fmt.Println("get lock")
 			defer func() {
-				lock.Unlock()
+				lock.Release()
 				fmt.Println("release the lock")
 			}()
 			time.Sleep(time.Second * 4)
-			defer wg.Done()
-		}()
-	}
-	wg.Wait()
-	deltaTime := time.Since(timeNow)
-	fmt.Println(deltaTime)
-}
-
-func TestRedisLock_SpinLock(t *testing.T) {
-	timeNow := time.Now()
-	lock := NewRedisLock(redisClient, "test-spain-lock", "myLock")
-	wg := new(sync.WaitGroup)
-	wg.Add(20)
-	for i := 0; i < 20; i++ {
-		go func() {
-			err := lock.SpinLock(5)
-			if err != nil {
-				fmt.Println(err.Error())
-				return
-			}
-			fmt.Println("get lock")
-			defer lock.Unlock()
-			defer func() {
-				fmt.Println("release the lock")
-			}()
 			defer wg.Done()
 		}()
 	}
