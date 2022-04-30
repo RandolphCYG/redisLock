@@ -1,10 +1,10 @@
-module github.com/RandolphCYG/redisLock
+module github.com/randolphcyg/redislock
 
 go 1.17
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/zeromicro/go-zero v1.3.1
+	github.com/zeromicro/go-zero v1.3.2
 )
 
 require (
